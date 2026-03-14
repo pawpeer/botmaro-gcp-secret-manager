@@ -23,7 +23,7 @@ A standalone, environment-aware secret management tool built on Google Secret Ma
 
 ```bash
 # Clone the repository
-git clone https://github.com/B9ice/botmaro-gcp-secret-manager.git
+git clone https://github.com/pawpeer/botmaro-gcp-secret-manager.git
 cd botmaro-gcp-secret-manager
 
 # Install in development mode
@@ -847,5 +847,5 @@ MIT License - see LICENSE file for details.
 ## Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/B9ice/botmaro-gcp-secret-manager/issues
-- Documentation: https://github.com/B9ice/botmaro-gcp-secret-manager
+- GitHub Issues: https://github.com/pawpeer/botmaro-gcp-secret-manager/issues
+- Documentation: https://github.com/pawpeer/botmaro-gcp-secret-manager

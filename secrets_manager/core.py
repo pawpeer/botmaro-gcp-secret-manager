@@ -116,7 +116,9 @@ class SecretsManager:
                 if value is not None:
                     # Secret exists in GSM - grant access to service accounts
                     for sa in global_sas:
-                        member = f"serviceAccount:{sa}" if not sa.startswith("serviceAccount:") else sa
+                        member = (
+                            f"serviceAccount:{sa}" if not sa.startswith("serviceAccount:") else sa
+                        )
                         globals_gsm.ensure_access(secret_name, member)
                 else:
                     if secret_config.required and secret_config.default is None:
@@ -191,9 +193,7 @@ class SecretsManager:
                         source_name = self._get_secret_name(env, None, secret_config.source)
                         value = gsm.get_secret_version(source_name)
                         if value is None:
-                            source_name = self._get_secret_name(
-                                env, project, secret_config.source
-                            )
+                            source_name = self._get_secret_name(env, project, secret_config.source)
                             value = gsm.get_secret_version(source_name)
                         if value is None:
                             raise ValueError(

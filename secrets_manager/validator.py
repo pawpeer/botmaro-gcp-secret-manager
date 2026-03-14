@@ -239,9 +239,7 @@ class SecretsValidator:
                 if value is None:
                     result.missing_secrets.append(f"global/{secret_config.name}")
                 elif self.check_placeholder_value(value):
-                    result.placeholder_secrets.append(
-                        (f"global/{secret_config.name}", value)
-                    )
+                    result.placeholder_secrets.append((f"global/{secret_config.name}", value))
                 else:
                     resolved_secrets.add(secret_config.name)
 
@@ -251,14 +249,10 @@ class SecretsValidator:
                             result.placeholder_service_accounts.append(sa)
                     else:
                         member = (
-                            f"serviceAccount:{sa}"
-                            if not sa.startswith("serviceAccount:")
-                            else sa
+                            f"serviceAccount:{sa}" if not sa.startswith("serviceAccount:") else sa
                         )
                         if not self.gsm.has_access(secret_name, member):
-                            result.missing_sa_access.append(
-                                (f"global/{secret_config.name}", sa)
-                            )
+                            result.missing_sa_access.append((f"global/{secret_config.name}", sa))
 
         # Check environment-level secrets from all secret categories
         secret_categories = env_config.get_all_secret_categories()
@@ -266,10 +260,7 @@ class SecretsValidator:
             for secret_config in secret_configs:
                 # Skip source-referenced secrets (they don't need their own GSM entry)
                 if secret_config.source:
-                    if (
-                        secret_config.source not in resolved_secrets
-                        and secret_config.required
-                    ):
+                    if secret_config.source not in resolved_secrets and secret_config.required:
                         result.missing_secrets.append(
                             f"{secret_config.name} (source: {secret_config.source})"
                         )
@@ -308,10 +299,7 @@ class SecretsValidator:
                 for secret_config in project_config.secrets:
                     # Skip source-referenced secrets
                     if secret_config.source:
-                        if (
-                            secret_config.source not in resolved_secrets
-                            and secret_config.required
-                        ):
+                        if secret_config.source not in resolved_secrets and secret_config.required:
                             result.missing_secrets.append(
                                 f"{project}/{secret_config.name} "
                                 f"(source: {secret_config.source})"

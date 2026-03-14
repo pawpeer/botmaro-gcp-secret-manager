@@ -27,6 +27,24 @@ class SecretsManager:
             self._gsm_clients[project_id] = GSMClient(project_id)
         return self._gsm_clients[project_id]
 
+    def _is_globals(self, env: str) -> bool:
+        """Check if the env refers to the globals namespace."""
+        return env == "globals"
+
+    def _get_globals_or_raise(self) -> GlobalConfig:
+        """Get globals config or raise if not configured."""
+        if not self.config.globals:
+            raise ValueError(
+                "No 'globals' section configured in secrets.yml. "
+                "Add a 'globals' section with gcp_project and prefix."
+            )
+        return self.config.globals
+
+    def _get_global_secret_name(self, secret: str) -> str:
+        """Generate the full secret name for a global secret."""
+        globals_config = self._get_globals_or_raise()
+        return f"{globals_config.prefix}--{secret}"
+
     def _get_secret_name(self, env: str, project: Optional[str], secret: str) -> str:
         """
         Generate the full secret name in GSM.
@@ -238,7 +256,7 @@ class SecretsManager:
         Set a secret value (create or update).
 
         Args:
-            env: Environment name
+            env: Environment name, or 'globals' for the global namespace
             secret: Secret name
             value: Secret value
             project: Optional project name
@@ -247,12 +265,16 @@ class SecretsManager:
         Returns:
             Dict with status information including the full secret name
         """
-        env_config = self.config.get_environment(env)
-        if not env_config:
-            raise ValueError(f"Environment '{env}' not found")
-
-        gsm = self._get_gsm_client(env_config.gcp_project)
-        secret_name = self._get_secret_name(env, project, secret)
+        if self._is_globals(env):
+            globals_config = self._get_globals_or_raise()
+            gsm = self._get_gsm_client(globals_config.gcp_project)
+            secret_name = self._get_global_secret_name(secret)
+        else:
+            env_config = self.config.get_environment(env)
+            if not env_config:
+                raise ValueError(f"Environment '{env}' not found")
+            gsm = self._get_gsm_client(env_config.gcp_project)
+            secret_name = self._get_secret_name(env, project, secret)
 
         result = gsm.ensure_secret(secret_name, value)
 
@@ -275,7 +297,7 @@ class SecretsManager:
         Get a secret value.
 
         Args:
-            env: Environment name
+            env: Environment name, or 'globals' for the global namespace
             secret: Secret name
             project: Optional project name
             version: Version to retrieve (default: latest)
@@ -283,12 +305,16 @@ class SecretsManager:
         Returns:
             Secret value or None if not found
         """
-        env_config = self.config.get_environment(env)
-        if not env_config:
-            raise ValueError(f"Environment '{env}' not found")
-
-        gsm = self._get_gsm_client(env_config.gcp_project)
-        secret_name = self._get_secret_name(env, project, secret)
+        if self._is_globals(env):
+            globals_config = self._get_globals_or_raise()
+            gsm = self._get_gsm_client(globals_config.gcp_project)
+            secret_name = self._get_global_secret_name(secret)
+        else:
+            env_config = self.config.get_environment(env)
+            if not env_config:
+                raise ValueError(f"Environment '{env}' not found")
+            gsm = self._get_gsm_client(env_config.gcp_project)
+            secret_name = self._get_secret_name(env, project, secret)
 
         return gsm.get_secret_version(secret_name, version)
 
@@ -297,19 +323,23 @@ class SecretsManager:
         Delete a secret.
 
         Args:
-            env: Environment name
+            env: Environment name, or 'globals' for the global namespace
             secret: Secret name
             project: Optional project name
 
         Returns:
             True if deleted, False if not found
         """
-        env_config = self.config.get_environment(env)
-        if not env_config:
-            raise ValueError(f"Environment '{env}' not found")
-
-        gsm = self._get_gsm_client(env_config.gcp_project)
-        secret_name = self._get_secret_name(env, project, secret)
+        if self._is_globals(env):
+            globals_config = self._get_globals_or_raise()
+            gsm = self._get_gsm_client(globals_config.gcp_project)
+            secret_name = self._get_global_secret_name(secret)
+        else:
+            env_config = self.config.get_environment(env)
+            if not env_config:
+                raise ValueError(f"Environment '{env}' not found")
+            gsm = self._get_gsm_client(env_config.gcp_project)
+            secret_name = self._get_secret_name(env, project, secret)
 
         return gsm.delete_secret(secret_name)
 
@@ -320,13 +350,30 @@ class SecretsManager:
         List all secrets for an environment.
 
         Args:
-            env: Environment name
+            env: Environment name, or 'globals' for the global namespace
             project: Optional project name to filter by
             scope: Optional scope filter ('env', 'project', 'global', or 'all'/'None' for all)
 
         Returns:
             List of (secret_name, value, scope) tuples where scope is 'global', 'env' or 'project'
         """
+        # Handle 'globals' as env directly
+        if self._is_globals(env):
+            globals_config = self._get_globals_or_raise()
+            globals_gsm = self._get_gsm_client(globals_config.gcp_project)
+            globals_prefix = globals_config.prefix
+
+            filter_str = f"name:{globals_prefix}--"
+            secret_ids = globals_gsm.list_secrets(filter_str)
+
+            results = []
+            for secret_id in secret_ids:
+                parts = secret_id.split("--")
+                name = parts[1] if len(parts) == 2 else secret_id
+                value = globals_gsm.get_secret_version(secret_id)
+                results.append((name, value, "global"))
+            return results
+
         env_config = self.config.get_environment(env)
         if not env_config:
             raise ValueError(f"Environment '{env}' not found")

@@ -30,6 +30,7 @@ def parse_target(target: str) -> tuple[str, Optional[str], Optional[str]]:
         'staging' -> ('staging', None, None)
         'staging.myproject.MY_SECRET' -> ('staging', 'myproject', 'MY_SECRET')
         'staging.MY_SECRET' -> ('staging', None, 'MY_SECRET')
+        'globals.MY_KEY' -> ('globals', None, 'MY_KEY')
     """
     parts = target.split(".")
 
@@ -267,7 +268,9 @@ def export(
 
 @app.command()
 def set(
-    target: str = typer.Argument(..., help="Target in format 'env[.project].SECRET_NAME'"),
+    target: str = typer.Argument(
+        ..., help="Target in format 'env[.project].SECRET_NAME' or 'globals.SECRET_NAME'"
+    ),
     value: Optional[str] = typer.Option(None, "--value", "-v", help="Secret value (or use stdin)"),
     config: Optional[str] = typer.Option(
         None, "--config", "-c", help="Path to secrets config file"
@@ -287,6 +290,10 @@ def set(
         \b
         # Set a project-scoped secret
         secrets-manager set staging.myapp.DATABASE_URL --value "postgres://..."
+
+        \b
+        # Set a global secret
+        secrets-manager set globals.VONAGE_API_KEY --value "abc123"
 
         \b
         # Read value from stdin
@@ -341,7 +348,9 @@ def set(
 
 @app.command()
 def get(
-    target: str = typer.Argument(..., help="Target in format 'env[.project].SECRET_NAME'"),
+    target: str = typer.Argument(
+        ..., help="Target in format 'env[.project].SECRET_NAME' or 'globals.SECRET_NAME'"
+    ),
     version: str = typer.Option("latest", "--version", help="Secret version to retrieve"),
     config: Optional[str] = typer.Option(
         None, "--config", "-c", help="Path to secrets config file"
@@ -359,6 +368,10 @@ def get(
         \b
         # Get specific version
         secrets-manager get staging.API_KEY --version 2
+
+        \b
+        # Get a global secret
+        secrets-manager get globals.VONAGE_API_KEY --reveal
     """
     try:
         # Load config
@@ -396,7 +409,9 @@ def get(
 
 @app.command()
 def delete(
-    target: str = typer.Argument(..., help="Target in format 'env[.project].SECRET_NAME'"),
+    target: str = typer.Argument(
+        ..., help="Target in format 'env[.project].SECRET_NAME' or 'globals.SECRET_NAME'"
+    ),
     config: Optional[str] = typer.Option(
         None, "--config", "-c", help="Path to secrets config file"
     ),
@@ -413,6 +428,10 @@ def delete(
         \b
         # Force delete without confirmation
         secrets-manager delete staging.OLD_API_KEY --force
+
+        \b
+        # Delete a global secret
+        secrets-manager delete globals.OLD_KEY --force
     """
     try:
         # Load config
@@ -454,7 +473,7 @@ def delete(
 
 @app.command()
 def list(
-    env: str = typer.Argument(..., help="Environment name"),
+    env: str = typer.Argument(..., help="Environment name, or 'globals' for global secrets"),
     project: Optional[str] = typer.Option(
         None, "--project", "-p", help="Project name to filter by"
     ),
@@ -487,6 +506,10 @@ def list(
         \b
         # List only project-scoped secrets
         secrets-manager list staging --scope project
+
+        \b
+        # List global secrets
+        secrets-manager list globals
     """
     try:
         # Load config

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-03-14
+
+### Fixed
+- Fixed black version pin (`>=25.1.0`) to support Python 3.9 in CI
+- Dropped Python 3.8 from CI matrix and requires-python (uses 3.9+ syntax)
+- Added Python 3.12 and 3.13 to CI test matrix
+- Upgraded actions/checkout to v5 (Node.js 22, fixes deprecation warnings)
+- Pinned security dependency minimums: urllib3>=2.6.3, protobuf>=6.33.5, pyasn1>=0.6.2
+- Updated repo URLs from B9ice to pawpeer org
+- Applied black formatting to core.py and validator.py
+
 ## [0.5.0] - 2026-03-14
 
 ### Added
@@ -198,7 +209,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret value masking in CLI output by default
 - Support for reading secrets from stdin for security
 
-[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.4.0...v0.4.1

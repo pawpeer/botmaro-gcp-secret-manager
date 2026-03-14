@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-03-14
+
+### Fixed
+- Fixed PyPI publish not triggering: `GITHUB_TOKEN` tag pushes don't trigger other workflows
+- Merged publish step directly into auto-release workflow so it runs in the same pipeline
+- Upgraded softprops/action-gh-release to v2
+
 ## [0.5.1] - 2026-03-14
 
 ### Fixed
@@ -209,7 +216,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret value masking in CLI output by default
 - Support for reading secrets from stdin for security
 
-[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.4.1...v0.4.2

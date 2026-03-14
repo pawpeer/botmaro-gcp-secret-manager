@@ -5,7 +5,7 @@ A standalone secret management tool for multi-environment deployments
 with Google Secret Manager.
 """
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 from .core import SecretsManager
 from .config import SecretConfig, EnvironmentConfig, GlobalConfig

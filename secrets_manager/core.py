@@ -3,7 +3,7 @@
 import os
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
-from .config import SecretsConfig, EnvironmentConfig, ProjectConfig
+from .config import SecretsConfig, EnvironmentConfig, ProjectConfig, GlobalConfig
 from .gsm import GSMClient
 from .validator import SecretsValidator, ValidationResult
 
@@ -74,6 +74,7 @@ class SecretsManager:
         Bootstrap an environment by loading all secrets.
 
         Automatically grants access to service accounts configured in secrets.yml.
+        Loads global secrets first, then environment secrets (with source resolution).
 
         Args:
             env: Environment name (staging, prod, etc.)
@@ -99,17 +100,27 @@ class SecretsManager:
         if deployer_sa:
             service_accounts_to_grant.add(deployer_sa)
 
-        # Load all secret categories (global_secrets, serverside_secrets, etc.)
-        secret_categories = env_config.get_all_secret_categories()
+        # Load global secrets first (project-agnostic)
+        if self.config.globals:
+            globals_config = self.config.globals
+            globals_gsm = self._get_gsm_client(globals_config.gcp_project)
+            globals_prefix = globals_config.prefix
 
-        for category_name, secret_configs in secret_categories.items():
-            for secret_config in secret_configs:
-                secret_name = self._get_secret_name(env, None, secret_config.name)
-                value = gsm.get_secret_version(secret_name)
+            global_sas = set(globals_config.service_accounts)
+            global_sas.update(service_accounts_to_grant)
 
-                if value is None:
+            for secret_config in globals_config.secrets:
+                secret_name = f"{globals_prefix}--{secret_config.name}"
+                value = globals_gsm.get_secret_version(secret_name)
+
+                if value is not None:
+                    # Secret exists in GSM - grant access to service accounts
+                    for sa in global_sas:
+                        member = f"serviceAccount:{sa}" if not sa.startswith("serviceAccount:") else sa
+                        globals_gsm.ensure_access(secret_name, member)
+                else:
                     if secret_config.required and secret_config.default is None:
-                        raise ValueError(f"Required secret '{secret_name}' not found")
+                        raise ValueError(f"Required global secret '{secret_name}' not found")
                     value = secret_config.default or ""
 
                 secrets[secret_config.name] = value
@@ -117,10 +128,47 @@ class SecretsManager:
                 if export_to_env:
                     os.environ[secret_config.name] = value
 
-                # Grant access to configured service accounts
-                for sa in service_accounts_to_grant:
-                    member = f"serviceAccount:{sa}" if not sa.startswith("serviceAccount:") else sa
-                    gsm.ensure_access(secret_name, member)
+        # Load all secret categories (global_secrets, serverside_secrets, etc.)
+        secret_categories = env_config.get_all_secret_categories()
+
+        for category_name, secret_configs in secret_categories.items():
+            for secret_config in secret_configs:
+                # Handle source reference: copy value from another key
+                if secret_config.source:
+                    if secret_config.source in secrets:
+                        value = secrets[secret_config.source]
+                    else:
+                        # Try to fetch the source secret from GSM
+                        source_name = self._get_secret_name(env, None, secret_config.source)
+                        value = gsm.get_secret_version(source_name)
+                        if value is None:
+                            raise ValueError(
+                                f"Source secret '{secret_config.source}' for "
+                                f"'{secret_config.name}' not found"
+                            )
+                else:
+                    secret_name = self._get_secret_name(env, None, secret_config.name)
+                    value = gsm.get_secret_version(secret_name)
+
+                    if value is not None:
+                        # Secret exists in GSM - grant access to service accounts
+                        for sa in service_accounts_to_grant:
+                            member = (
+                                f"serviceAccount:{sa}"
+                                if not sa.startswith("serviceAccount:")
+                                else sa
+                            )
+                            gsm.ensure_access(secret_name, member)
+                    else:
+                        # Fall back to default value
+                        if secret_config.required and secret_config.default is None:
+                            raise ValueError(f"Required secret '{secret_name}' not found")
+                        value = secret_config.default or ""
+
+                secrets[secret_config.name] = value
+
+                if export_to_env:
+                    os.environ[secret_config.name] = value
 
         # Load project-specific secrets if project is specified
         if project:
@@ -134,23 +182,47 @@ class SecretsManager:
                 project_service_accounts.update(project_config.service_accounts)
 
             for secret_config in project_config.secrets:
-                secret_name = self._get_secret_name(env, project, secret_config.name)
-                value = gsm.get_secret_version(secret_name)
+                # Handle source reference for project secrets too
+                if secret_config.source:
+                    if secret_config.source in secrets:
+                        value = secrets[secret_config.source]
+                    else:
+                        # Try env-level first, then project-level
+                        source_name = self._get_secret_name(env, None, secret_config.source)
+                        value = gsm.get_secret_version(source_name)
+                        if value is None:
+                            source_name = self._get_secret_name(
+                                env, project, secret_config.source
+                            )
+                            value = gsm.get_secret_version(source_name)
+                        if value is None:
+                            raise ValueError(
+                                f"Source secret '{secret_config.source}' for "
+                                f"'{secret_config.name}' not found"
+                            )
+                else:
+                    secret_name = self._get_secret_name(env, project, secret_config.name)
+                    value = gsm.get_secret_version(secret_name)
 
-                if value is None:
-                    if secret_config.required and secret_config.default is None:
-                        raise ValueError(f"Required secret '{secret_name}' not found")
-                    value = secret_config.default or ""
+                    if value is not None:
+                        # Secret exists in GSM - grant access to service accounts
+                        for sa in project_service_accounts:
+                            member = (
+                                f"serviceAccount:{sa}"
+                                if not sa.startswith("serviceAccount:")
+                                else sa
+                            )
+                            gsm.ensure_access(secret_name, member)
+                    else:
+                        # Fall back to default value
+                        if secret_config.required and secret_config.default is None:
+                            raise ValueError(f"Required secret '{secret_name}' not found")
+                        value = secret_config.default or ""
 
                 secrets[secret_config.name] = value
 
                 if export_to_env:
                     os.environ[secret_config.name] = value
-
-                # Grant access to configured service accounts (environment + project)
-                for sa in project_service_accounts:
-                    member = f"serviceAccount:{sa}" if not sa.startswith("serviceAccount:") else sa
-                    gsm.ensure_access(secret_name, member)
 
         return secrets
 
@@ -250,10 +322,10 @@ class SecretsManager:
         Args:
             env: Environment name
             project: Optional project name to filter by
-            scope: Optional scope filter ('env', 'project', or 'all'/'None' for all)
+            scope: Optional scope filter ('env', 'project', 'global', or 'all'/'None' for all)
 
         Returns:
-            List of (secret_name, value, scope) tuples where scope is 'env' or 'project'
+            List of (secret_name, value, scope) tuples where scope is 'global', 'env' or 'project'
         """
         env_config = self.config.get_environment(env)
         if not env_config:
@@ -261,6 +333,27 @@ class SecretsManager:
 
         gsm = self._get_gsm_client(env_config.gcp_project)
         prefix = env_config.prefix or f"botmaro-{env}"
+
+        results = []
+
+        # Include global secrets if scope allows
+        if self.config.globals and scope in (None, "all", "global"):
+            globals_config = self.config.globals
+            globals_gsm = self._get_gsm_client(globals_config.gcp_project)
+            globals_prefix = globals_config.prefix
+
+            filter_str = f"name:{globals_prefix}--"
+            secret_ids = globals_gsm.list_secrets(filter_str)
+
+            for secret_id in secret_ids:
+                parts = secret_id.split("--")
+                name = parts[1] if len(parts) == 2 else secret_id
+                value = globals_gsm.get_secret_version(secret_id)
+                results.append((name, value, "global"))
+
+        # Skip env/project secrets if only globals requested
+        if scope == "global":
+            return results
 
         # Build filter - use double-hyphen convention
         if project:
@@ -270,7 +363,6 @@ class SecretsManager:
 
         secret_ids = gsm.list_secrets(filter_str)
 
-        results = []
         for secret_id in secret_ids:
             # Parse using double-hyphen separator
             parts = secret_id.split("--")

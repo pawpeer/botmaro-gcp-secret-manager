@@ -15,6 +15,7 @@ class SecretConfig(BaseModel):
     description: Optional[str] = None
     required: bool = True
     default: Optional[str] = None
+    source: Optional[str] = None
 
 
 class ProjectConfig(BaseModel):
@@ -85,10 +86,20 @@ class EnvironmentConfig(BaseModel):
         return secret_categories
 
 
+class GlobalConfig(BaseModel):
+    """Configuration for project-agnostic global secrets."""
+
+    gcp_project: str
+    prefix: str = "pawpeer"
+    secrets: List[SecretConfig] = Field(default_factory=list)
+    service_accounts: List[str] = Field(default_factory=list)
+
+
 class SecretsConfig(BaseModel):
     """Root configuration for all environments and secrets."""
 
     version: str = "1.0"
+    globals: Optional[GlobalConfig] = None
     environments: Dict[str, EnvironmentConfig] = Field(default_factory=dict)
 
     @classmethod

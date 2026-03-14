@@ -1,5 +1,5 @@
-include README.secrets-manager.md
-include SETUP.secrets-manager.md
+include README.md
+include CHANGELOG.md
 include LICENSE
 include secrets.example.yml
 include pyproject.toml

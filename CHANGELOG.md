@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-14
+
+### Added
+- **Secret source references (`source` field)**
+  - New `source` field on `SecretConfig` allows aliasing another key's value
+  - `source: SUPABASE_URL` on `NEXT_PUBLIC_SUPABASE_URL` exports `NEXT_PUBLIC_SUPABASE_URL=<SUPABASE_URL value>`
+  - No separate GSM entry needed for source-referenced secrets
+  - Works in environment-level and project-level secret categories
+  - Source resolution checks already-loaded secrets first, then falls back to GSM lookup
+- **Global namespace (`globals` config section)**
+  - New top-level `globals` section for project/environment-agnostic secrets
+  - Stored in a dedicated GCP project under a configurable prefix (default: `pawpeer`)
+  - Automatically loaded during bootstrap for any environment
+  - Available for `source` resolution from environment secrets
+  - New `--scope global` filter in the `list` command
+  - New `GlobalConfig` model exported from the package
+- **Default value export support**
+  - Secrets with `default` values are now properly included in `export` and `bootstrap` output
+  - GSM values override defaults when present; defaults used when secret is absent from GSM
+  - Fixed bug where `ensure_access` was called on non-existent GSM secrets when falling back to defaults
+
+### Fixed
+- Fixed `ensure_access` called on secrets not present in GSM when using default values
+- Fixed MANIFEST.in referencing non-existent files (`README.secrets-manager.md`, `SETUP.secrets-manager.md`)
+- Removed duplicate `SUPABASE_URL` and `TWILIO_AUTH_TOKEN` entries in `secrets.yml`
+- Fixed deprecated `project.license` table format in `pyproject.toml` (now uses SPDX string)
+- Removed deprecated license classifier in favor of SPDX license expression
+- Fixed version mismatch between `pyproject.toml` and `__init__.py`
+- Added Python 3.12 and 3.13 classifiers
+
 ## [0.4.2] - 2025-01-17
 
 ### Fixed
@@ -168,7 +198,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret value masking in CLI output by default
 - Support for reading secrets from stdin for security
 
-[Unreleased]: https://github.com/B9ice/botmaro-gcp-secret-manager/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/B9ice/botmaro-gcp-secret-manager/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/B9ice/botmaro-gcp-secret-manager/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/B9ice/botmaro-gcp-secret-manager/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/B9ice/botmaro-gcp-secret-manager/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/B9ice/botmaro-gcp-secret-manager/compare/v0.3.0...v0.4.0

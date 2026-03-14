@@ -465,7 +465,7 @@ def list(
     scope: Optional[str] = typer.Option(
         None,
         "--scope",
-        help="Filter by scope: 'env' (environment-level only), 'project' (project-level only), or 'all' (default)",
+        help="Filter by scope: 'env' (environment-level only), 'project' (project-level only), 'global' (global namespace only), or 'all' (default)",
     ),
 ):
     """
@@ -496,9 +496,9 @@ def list(
         manager = SecretsManager()
 
         # Validate scope option
-        if scope and scope not in ["env", "project", "all"]:
+        if scope and scope not in ["env", "project", "global", "all"]:
             console.print(
-                "[red]✗ Error:[/red] --scope must be one of: env, project, all",
+                "[red]✗ Error:[/red] --scope must be one of: env, project, global, all",
                 style="bold red",
             )
             raise typer.Exit(code=1)
@@ -513,6 +513,8 @@ def list(
             scope_label = " (environment-level only)"
         elif scope == "project":
             scope_label = " (project-level only)"
+        elif scope == "global":
+            scope_label = " (global namespace only)"
 
         table = Table(title=f"Secrets - {env}" + (f".{project}" if project else "") + scope_label)
         table.add_column("Secret Name", style="cyan")

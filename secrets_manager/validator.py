@@ -225,10 +225,56 @@ class SecretsValidator:
             elif workflow_path.is_dir():
                 result.workflow_secrets = self.extract_secrets_from_workflows(workflow_path)
 
+        # Track all resolved secrets for source validation
+        resolved_secrets = set()
+
+        # Validate global secrets if configured
+        if self.config.globals:
+            globals_config = self.config.globals
+            globals_prefix = globals_config.prefix
+
+            for secret_config in globals_config.secrets:
+                secret_name = f"{globals_prefix}--{secret_config.name}"
+                value = self.gsm.get_secret_version(secret_name)
+                if value is None:
+                    result.missing_secrets.append(f"global/{secret_config.name}")
+                elif self.check_placeholder_value(value):
+                    result.placeholder_secrets.append(
+                        (f"global/{secret_config.name}", value)
+                    )
+                else:
+                    resolved_secrets.add(secret_config.name)
+
+                for sa in globals_config.service_accounts:
+                    if self.check_placeholder_sa(sa):
+                        if sa not in result.placeholder_service_accounts:
+                            result.placeholder_service_accounts.append(sa)
+                    else:
+                        member = (
+                            f"serviceAccount:{sa}"
+                            if not sa.startswith("serviceAccount:")
+                            else sa
+                        )
+                        if not self.gsm.has_access(secret_name, member):
+                            result.missing_sa_access.append(
+                                (f"global/{secret_config.name}", sa)
+                            )
+
         # Check environment-level secrets from all secret categories
         secret_categories = env_config.get_all_secret_categories()
         for category_name, secret_configs in secret_categories.items():
             for secret_config in secret_configs:
+                # Skip source-referenced secrets (they don't need their own GSM entry)
+                if secret_config.source:
+                    if (
+                        secret_config.source not in resolved_secrets
+                        and secret_config.required
+                    ):
+                        result.missing_secrets.append(
+                            f"{secret_config.name} (source: {secret_config.source})"
+                        )
+                    continue
+
                 secret_name = f"{prefix}--{secret_config.name}"
 
                 # Check if secret exists
@@ -237,6 +283,8 @@ class SecretsValidator:
                     result.missing_secrets.append(secret_config.name)
                 elif self.check_placeholder_value(value):
                     result.placeholder_secrets.append((secret_config.name, value))
+                else:
+                    resolved_secrets.add(secret_config.name)
 
                 # Check service account access
                 for sa in env_config.service_accounts:
@@ -258,6 +306,18 @@ class SecretsValidator:
                 project_sas.update(project_config.service_accounts)
 
                 for secret_config in project_config.secrets:
+                    # Skip source-referenced secrets
+                    if secret_config.source:
+                        if (
+                            secret_config.source not in resolved_secrets
+                            and secret_config.required
+                        ):
+                            result.missing_secrets.append(
+                                f"{project}/{secret_config.name} "
+                                f"(source: {secret_config.source})"
+                            )
+                        continue
+
                     secret_name = f"{prefix}--{project}--{secret_config.name}"
 
                     # Check if secret exists
@@ -292,6 +352,10 @@ class SecretsValidator:
             secret_categories = env_config.get_all_secret_categories()
             for category_name, secret_configs in secret_categories.items():
                 defined_secrets.update({s.name for s in secret_configs})
+
+            # Include global secrets
+            if self.config.globals:
+                defined_secrets.update({s.name for s in self.config.globals.secrets})
 
             if project:
                 project_config = env_config.projects.get(project)

@@ -7,7 +7,7 @@ name = "botmaro-secrets-manager"
 version = "0.5.0"
 description = "A standalone secret management tool for multi-environment deployments with Google Secret Manager"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = "MIT"
 authors = [
     {name = "Botmaro Team"}
@@ -17,7 +17,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -32,12 +31,15 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
+    "urllib3>=2.6.3",
+    "protobuf>=6.33.5",
+    "pyasn1>=0.6.2",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
-    "black>=23.0.0",
+    "black>=26.3.1",
     "mypy>=1.0.0",
     "types-PyYAML>=6.0.0",
 ]
@@ -56,7 +58,7 @@ include = ["secrets_manager*"]
 
 [tool.black]
 line-length = 100
-target-version = ['py38']
+target-version = ['py39']
 
 [tool.mypy]
 python_version = "3.9"

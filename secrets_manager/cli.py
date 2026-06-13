@@ -21,6 +21,26 @@ app = typer.Typer(
 console = Console()
 
 
+def create_manager(
+    config: Optional[str] = None,
+    allow_missing_config: bool = False,
+    skip_config: bool = False,
+) -> SecretsManager:
+    """Create a manager, optionally allowing schema-free global operations."""
+    if skip_config:
+        return SecretsManager(SecretsConfig())
+
+    if config:
+        os.environ["SECRETS_CONFIG_PATH"] = config
+
+    try:
+        return SecretsManager()
+    except FileNotFoundError:
+        if allow_missing_config and not config:
+            return SecretsManager(SecretsConfig())
+        raise
+
+
 def parse_target(target: str) -> tuple[str, Optional[str], Optional[str]]:
     """
     Parse target string into (env, project, secret).
@@ -134,6 +154,8 @@ def bootstrap(
 
         raise typer.Exit(code=0)
 
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]✗ Error:[/red] {str(e)}", style="bold red")
         raise typer.Exit(code=1)
@@ -261,6 +283,8 @@ def export(
 
         raise typer.Exit(code=0)
 
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]✗ Error:[/red] {str(e)}", style="bold red")
         raise typer.Exit(code=1)
@@ -269,7 +293,8 @@ def export(
 @app.command()
 def set(
     target: str = typer.Argument(
-        ..., help="Target in format 'env[.project].SECRET_NAME' or 'globals.SECRET_NAME'"
+        ...,
+        help="Target in format 'env[.project].SECRET_NAME' or 'globals.<namespace>.SECRET_NAME'",
     ),
     value: Optional[str] = typer.Option(None, "--value", "-v", help="Secret value (or use stdin)"),
     config: Optional[str] = typer.Option(
@@ -293,7 +318,7 @@ def set(
 
         \b
         # Set a global secret
-        secrets-manager set globals.VONAGE_API_KEY --value "abc123"
+        secrets-manager set globals.pawpeer.VONAGE_API_KEY --value "abc123"
 
         \b
         # Read value from stdin
@@ -341,6 +366,8 @@ def set(
 
         raise typer.Exit(code=0)
 
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]✗ Error:[/red] {str(e)}", style="bold red")
         raise typer.Exit(code=1)
@@ -349,11 +376,17 @@ def set(
 @app.command()
 def get(
     target: str = typer.Argument(
-        ..., help="Target in format 'env[.project].SECRET_NAME' or 'globals.SECRET_NAME'"
+        ...,
+        help="Target in format 'env[.project].SECRET_NAME' or 'globals.<namespace>.SECRET_NAME'",
     ),
     version: str = typer.Option("latest", "--version", help="Secret version to retrieve"),
     config: Optional[str] = typer.Option(
         None, "--config", "-c", help="Path to secrets config file"
+    ),
+    gcp_project: Optional[str] = typer.Option(
+        None,
+        "--gcp-project",
+        help="GCP project for schema-free global targets like globals.pawpeer.SECRET",
     ),
     reveal: bool = typer.Option(False, "--reveal", help="Show the full secret value"),
 ):
@@ -371,15 +404,13 @@ def get(
 
         \b
         # Get a global secret
-        secrets-manager get globals.VONAGE_API_KEY --reveal
+        secrets-manager get globals.pawpeer.VONAGE_API_KEY --reveal
+
+        \b
+        # Get a namespaced global secret without secrets.yml
+        secrets-manager get globals.pawpeer.VONAGE_API_KEY --gcp-project botmaro-core-platform --reveal
     """
     try:
-        # Load config
-        if config:
-            os.environ["SECRETS_CONFIG_PATH"] = config
-
-        manager = SecretsManager()
-
         # Parse target
         env, project, secret = parse_target(target)
 
@@ -387,8 +418,21 @@ def get(
             console.print("[red]✗ Error:[/red] Secret name required in target", style="bold red")
             raise typer.Exit(code=1)
 
+        schema_free_global = env == "globals" and project is not None and not config
+        manager = create_manager(
+            config=config,
+            allow_missing_config=schema_free_global,
+            skip_config=schema_free_global,
+        )
+
         # Get the secret
-        value = manager.get_secret(env=env, secret=secret, project=project, version=version)
+        value = manager.get_secret(
+            env=env,
+            secret=secret,
+            project=project,
+            version=version,
+            gcp_project=gcp_project,
+        )
 
         if value is None:
             console.print(f"[yellow]![/yellow] Secret not found", style="bold yellow")
@@ -402,6 +446,8 @@ def get(
 
         raise typer.Exit(code=0)
 
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]✗ Error:[/red] {str(e)}", style="bold red")
         raise typer.Exit(code=1)
@@ -410,7 +456,8 @@ def get(
 @app.command()
 def delete(
     target: str = typer.Argument(
-        ..., help="Target in format 'env[.project].SECRET_NAME' or 'globals.SECRET_NAME'"
+        ...,
+        help="Target in format 'env[.project].SECRET_NAME' or 'globals.<namespace>.SECRET_NAME'",
     ),
     config: Optional[str] = typer.Option(
         None, "--config", "-c", help="Path to secrets config file"
@@ -431,7 +478,7 @@ def delete(
 
         \b
         # Delete a global secret
-        secrets-manager delete globals.OLD_KEY --force
+        secrets-manager delete globals.pawpeer.OLD_KEY --force
     """
     try:
         # Load config
@@ -473,18 +520,38 @@ def delete(
 
 @app.command()
 def list(
-    env: str = typer.Argument(..., help="Environment name, or 'globals' for global secrets"),
+    env: str = typer.Argument(..., help="Environment name, 'globals', or 'globals.<namespace>'"),
     project: Optional[str] = typer.Option(
         None, "--project", "-p", help="Project name to filter by"
     ),
     config: Optional[str] = typer.Option(
         None, "--config", "-c", help="Path to secrets config file"
     ),
+    gcp_project: Optional[str] = typer.Option(
+        None,
+        "--gcp-project",
+        help="GCP project for schema-free global targets like globals.pawpeer",
+    ),
     reveal: bool = typer.Option(False, "--reveal", help="Show secret values"),
     scope: Optional[str] = typer.Option(
         None,
         "--scope",
-        help="Filter by scope: 'env' (environment-level only), 'project' (project-level only), 'global' (global namespace only), or 'all' (default)",
+        help="Filter by scope: 'env' (environment-level only), 'project' (project-level only), or 'all' (default)",
+    ),
+    include: Optional[List[str]] = typer.Option(
+        None,
+        "--include",
+        help="Include optional sections. Supported values: global, globals",
+    ),
+    include_global_flag: bool = typer.Option(
+        False,
+        "--global",
+        help="Include global secrets when listing an environment",
+    ),
+    include_globals_flag: bool = typer.Option(
+        False,
+        "--globals",
+        help="Alias for --global",
     ),
 ):
     """
@@ -510,62 +577,124 @@ def list(
         \b
         # List global secrets
         secrets-manager list globals
+
+        \b
+        # List a namespaced global secret namespace
+        secrets-manager list globals.pawpeer --gcp-project botmaro-core-platform
+
+        \b
+        # Include global secrets with environment output
+        secrets-manager list staging --include global
+
+        \b
+        # Same as above, with aliases
+        secrets-manager list staging --global
+        secrets-manager list staging --globals
     """
     try:
-        # Load config
-        if config:
-            os.environ["SECRETS_CONFIG_PATH"] = config
-
-        manager = SecretsManager()
-
         # Validate scope option
         if scope and scope not in ["env", "project", "global", "all"]:
             console.print(
-                "[red]✗ Error:[/red] --scope must be one of: env, project, global, all",
+                "[red]✗ Error:[/red] --scope must be one of: env, project, all",
                 style="bold red",
             )
             raise typer.Exit(code=1)
 
+        include_values = include or []
+        unknown_includes = [value for value in include_values if value not in ("global", "globals")]
+        if unknown_includes:
+            console.print(
+                "[red]✗ Error:[/red] --include must be one of: global, globals",
+                style="bold red",
+            )
+            raise typer.Exit(code=1)
+
+        include_global = (
+            include_global_flag
+            or include_globals_flag
+            or "global" in include_values
+            or "globals" in include_values
+            or scope == "global"
+        )
+
+        if scope == "global":
+            console.print(
+                "[yellow]![/yellow] --scope global is deprecated; use --include global, "
+                "--global, or --globals",
+                style="bold yellow",
+            )
+
+        target_env = env
+        global_namespace = None
+        if env.startswith("globals."):
+            target_env = "globals"
+            global_namespace = env.split(".", 1)[1]
+        elif env == "globals":
+            target_env = "globals"
+
+        if global_namespace:
+            if project:
+                console.print(
+                    "[red]✗ Error:[/red] --project cannot be used with globals.<namespace>",
+                    style="bold red",
+                )
+                raise typer.Exit(code=1)
+            project = global_namespace
+
+        schema_free_global = target_env == "globals" and project is not None and not config
+        manager = create_manager(
+            config=config,
+            allow_missing_config=schema_free_global,
+            skip_config=schema_free_global,
+        )
+
         # List secrets
         with console.status(f"[bold green]Loading secrets..."):
-            secrets = manager.list_secrets(env=env, project=project, scope=scope)
+            groups = manager.list_secret_groups(
+                env=target_env,
+                project=project,
+                include_global=include_global,
+                global_project_id=gcp_project,
+            )
 
-        # Display results
-        scope_label = ""
-        if scope == "env":
-            scope_label = " (environment-level only)"
-        elif scope == "project":
-            scope_label = " (project-level only)"
-        elif scope == "global":
-            scope_label = " (global namespace only)"
+        if scope == "global":
+            groups = [group for group in groups if group.scope == "global"]
+        elif scope in ("env", "project"):
+            groups = [group for group in groups if group.scope == scope]
 
-        table = Table(title=f"Secrets - {env}" + (f".{project}" if project else "") + scope_label)
-        table.add_column("Secret Name", style="cyan")
-        table.add_column("Scope", style="yellow")
-        table.add_column("Value", style="green")
+        total = 0
+        for group in groups:
+            table = Table(title=group.title)
+            table.add_column("Secret Name", style="cyan")
+            table.add_column("Scope", style="yellow")
+            table.add_column("Value", style="green")
 
-        for name, value, secret_scope in secrets:
-            if value and reveal:
-                # Check if value is a placeholder
-                if value.startswith("PLACEHOLDER") or "placeholder" in value.lower():
-                    table.add_row(name, secret_scope, f"[red]{value}[/red]")
+            for name, value, secret_scope in group.secrets:
+                total += 1
+                if value and reveal:
+                    # Check if value is a placeholder
+                    if value.startswith("PLACEHOLDER") or "placeholder" in value.lower():
+                        table.add_row(name, secret_scope, f"[red]{value}[/red]")
+                    else:
+                        table.add_row(name, secret_scope, value)
+                elif value:
+                    # Check if value is a placeholder
+                    if value.startswith("PLACEHOLDER") or "placeholder" in value.lower():
+                        table.add_row(name, secret_scope, "[red]PLACEHOLDER[/red]")
+                    else:
+                        masked = f"{value[:4]}...{value[-4:]}" if len(value) > 8 else "***"
+                        table.add_row(name, secret_scope, masked)
                 else:
-                    table.add_row(name, secret_scope, value)
-            elif value:
-                # Check if value is a placeholder
-                if value.startswith("PLACEHOLDER") or "placeholder" in value.lower():
-                    table.add_row(name, secret_scope, "[red]PLACEHOLDER[/red]")
-                else:
-                    masked = f"{value[:4]}...{value[-4:]}" if len(value) > 8 else "***"
-                    table.add_row(name, secret_scope, masked)
-            else:
-                table.add_row(name, secret_scope, "[red]<not found>[/red]")
+                    table.add_row(name, secret_scope, "[red]<not found>[/red]")
 
-        console.print(table)
-        console.print(f"\nTotal: {len(secrets)} secrets")
+            console.print(table)
+
+        console.print(f"\nTotal: {total} secrets")
 
         raise typer.Exit(code=0)
 
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]✗ Error:[/red] {str(e)}", style="bold red")
         raise typer.Exit(code=1)
@@ -1064,7 +1193,12 @@ def import_secrets(
 @app.command()
 def version():
     """Show version information."""
-    from . import __version__
+    from importlib.metadata import PackageNotFoundError, version as package_version
+
+    try:
+        __version__ = package_version("botmaro-secrets-manager")
+    except PackageNotFoundError:
+        from . import __version__
 
     console.print(f"Botmaro Secrets Manager v{__version__}")
     raise typer.Exit(code=0)

@@ -45,13 +45,19 @@ Create a `secrets.yml` file defining your environments and secrets:
 ```yaml
 version: "1.0"
 
+globals:
+  pawpeer:
+    gcp_project: your-gcp-project-global
+    prefix: pawpeer
+    global_secrets:
+      - name: API_KEY
+        required: true
+
 environments:
   staging:
     name: staging
     gcp_project: your-gcp-project-staging
     global_secrets:
-      - name: API_KEY
-        required: true
       - name: DATABASE_URL
         required: true
 ```
@@ -136,6 +142,8 @@ secrets-manager set <target> [OPTIONS]
 Target format:
   - env.SECRET_NAME              (environment-scoped)
   - env.project.SECRET_NAME      (project-scoped)
+  - globals.NAMESPACE.SECRET_NAME (schema-free global namespace)
+  - globals.SECRET_NAME          (when config has one global namespace)
 
 Options:
   --value, -v TEXT     Secret value (or read from stdin)
@@ -151,6 +159,9 @@ secrets-manager set staging.API_KEY --value "sk-123456"
 
 # Set a project-scoped secret
 secrets-manager set staging.orchestrator.DATABASE_URL --value "postgres://..."
+
+# Set a global secret
+secrets-manager set globals.pawpeer.VONAGE_API_KEY --value "abc123"
 
 # Read from stdin
 echo "secret-value" | secrets-manager set staging.MY_SECRET
@@ -171,6 +182,7 @@ secrets-manager get <target> [OPTIONS]
 Options:
   --version TEXT       Secret version to retrieve [default: latest]
   --config, -c TEXT    Path to secrets config file
+  --gcp-project TEXT   GCP project for schema-free global namespace lookups
   --reveal             Show the full secret value
 ```
 
@@ -185,6 +197,11 @@ secrets-manager get staging.API_KEY --reveal
 
 # Get specific version
 secrets-manager get staging.API_KEY --version 2 --reveal
+
+# Get a namespaced global secret without loading secrets.yml
+secrets-manager get globals.pawpeer.VONAGE_API_KEY \
+  --gcp-project your-gcp-project-global \
+  --reveal
 ```
 
 #### List Command
@@ -197,6 +214,10 @@ secrets-manager list <environment> [OPTIONS]
 Options:
   --project, -p TEXT   Project name to filter by
   --config, -c TEXT    Path to secrets config file
+  --gcp-project TEXT   GCP project for schema-free global namespace lookups
+  --include global     Include global secrets in the listing
+  --global             Alias for --include global
+  --globals            Alias for --include globals
   --reveal             Show secret values
 ```
 
@@ -211,6 +232,16 @@ secrets-manager list staging --project orchestrator
 
 # Show values (masked by default)
 secrets-manager list staging --reveal
+
+# Include global secrets as a separate section
+secrets-manager list staging --include global
+
+# Same as above, with aliases
+secrets-manager list staging --global
+secrets-manager list staging --globals
+
+# List only a named global namespace
+secrets-manager list globals.pawpeer --gcp-project your-gcp-project-global
 ```
 
 #### Delete Command
@@ -233,6 +264,9 @@ secrets-manager delete staging.OLD_API_KEY
 
 # Force delete
 secrets-manager delete staging.OLD_API_KEY --force
+
+# Delete a namespaced global secret
+secrets-manager delete globals.pawpeer.OLD_API_KEY --force
 ```
 
 #### Export Command

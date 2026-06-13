@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import yaml
 import json
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
 
 
 class SecretConfig(BaseModel):
@@ -14,8 +14,23 @@ class SecretConfig(BaseModel):
     name: str
     description: Optional[str] = None
     required: bool = True
-    default: Optional[str] = None
+    default: Optional[Any] = None
     source: Optional[str] = None
+
+
+def _parse_secret_category(value: Any) -> List[SecretConfig]:
+    """Parse a list-like config value into secret configs when possible."""
+    if not isinstance(value, list):
+        return []
+
+    parsed_secrets = []
+    for item in value:
+        if isinstance(item, SecretConfig):
+            parsed_secrets.append(item)
+        elif isinstance(item, dict) and "name" in item:
+            parsed_secrets.append(SecretConfig(**item))
+
+    return parsed_secrets
 
 
 class ProjectConfig(BaseModel):
@@ -62,12 +77,7 @@ class EnvironmentConfig(BaseModel):
                 value = getattr(self, field_name, [])
                 if isinstance(value, list):
                     # Parse list items as SecretConfig if they're dicts
-                    parsed_secrets = []
-                    for item in value:
-                        if isinstance(item, dict):
-                            parsed_secrets.append(SecretConfig(**item))
-                        elif isinstance(item, SecretConfig):
-                            parsed_secrets.append(item)
+                    parsed_secrets = _parse_secret_category(value)
                     secret_categories[field_name] = parsed_secrets
 
         # Also check extra fields (fields not defined in model)
@@ -75,12 +85,7 @@ class EnvironmentConfig(BaseModel):
             for field_name, value in self.__pydantic_extra__.items():
                 if field_name.endswith("_secrets") and isinstance(value, list):
                     # Parse list items as SecretConfig
-                    parsed_secrets = []
-                    for item in value:
-                        if isinstance(item, dict):
-                            parsed_secrets.append(SecretConfig(**item))
-                        elif isinstance(item, SecretConfig):
-                            parsed_secrets.append(item)
+                    parsed_secrets = _parse_secret_category(value)
                     secret_categories[field_name] = parsed_secrets
 
         return secret_categories
@@ -89,18 +94,58 @@ class EnvironmentConfig(BaseModel):
 class GlobalConfig(BaseModel):
     """Configuration for project-agnostic global secrets."""
 
+    model_config = ConfigDict(extra="allow")
+
+    namespace: Optional[str] = None
     gcp_project: str
-    prefix: str = "pawpeer"
+    prefix: Optional[str] = None
     secrets: List[SecretConfig] = Field(default_factory=list)
     service_accounts: List[str] = Field(default_factory=list)
+
+    def get_prefix(self) -> str:
+        """Get the GSM secret-name prefix for this global namespace."""
+        return self.prefix or self.namespace or "pawpeer"
+
+    def get_all_secret_categories(self) -> Dict[str, List[SecretConfig]]:
+        """
+        Get all global secret categories.
+
+        Globals are often organized by arbitrary category names (for example
+        firebase_secrets or netlify_deploy), so extra list fields containing
+        secret-shaped objects are treated as categories.
+        """
+        secret_categories = {}
+
+        if self.secrets:
+            secret_categories["secrets"] = self.secrets
+
+        if hasattr(self, "__pydantic_extra__") and self.__pydantic_extra__:
+            for field_name, value in self.__pydantic_extra__.items():
+                parsed_secrets = _parse_secret_category(value)
+                if parsed_secrets or isinstance(value, list):
+                    secret_categories[field_name] = parsed_secrets
+
+        return secret_categories
 
 
 class SecretsConfig(BaseModel):
     """Root configuration for all environments and secrets."""
 
     version: str = "1.0"
-    globals: Optional[GlobalConfig] = None
+    globals: Optional[Union[GlobalConfig, Dict[str, GlobalConfig]]] = None
     environments: Dict[str, EnvironmentConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def set_global_namespaces(self) -> "SecretsConfig":
+        """Propagate mapping keys into global namespace configs."""
+        if isinstance(self.globals, GlobalConfig):
+            if not self.globals.namespace:
+                self.globals.namespace = self.globals.get_prefix()
+        elif isinstance(self.globals, dict):
+            for namespace, global_config in self.globals.items():
+                if not global_config.namespace:
+                    global_config.namespace = namespace
+        return self
 
     @classmethod
     def from_file(cls, path: Union[str, Path]) -> "SecretsConfig":
@@ -134,4 +179,29 @@ class SecretsConfig(BaseModel):
         env = self.get_environment(env_name)
         if env:
             return env.projects.get(project_name)
+        return None
+
+    def get_global_namespaces(self) -> Dict[str, GlobalConfig]:
+        """Get globals keyed by namespace."""
+        if not self.globals:
+            return {}
+
+        if isinstance(self.globals, GlobalConfig):
+            namespace = self.globals.namespace or self.globals.get_prefix()
+            return {namespace: self.globals}
+
+        return self.globals
+
+    def get_global_config(self, namespace: str) -> Optional[GlobalConfig]:
+        """Get a global config by namespace or configured GSM prefix."""
+        for configured_namespace, global_config in self.get_global_namespaces().items():
+            if namespace in (configured_namespace, global_config.get_prefix()):
+                return global_config
+        return None
+
+    def get_default_global_namespace(self) -> Optional[str]:
+        """Return the sole configured global namespace, if unambiguous."""
+        namespaces = self.get_global_namespaces()
+        if len(namespaces) == 1:
+            return next(iter(namespaces))
         return None

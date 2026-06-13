@@ -229,30 +229,33 @@ class SecretsValidator:
         resolved_secrets = set()
 
         # Validate global secrets if configured
-        if self.config.globals:
-            globals_config = self.config.globals
-            globals_prefix = globals_config.prefix
+        for namespace, globals_config in self.config.get_global_namespaces().items():
+            globals_prefix = globals_config.get_prefix()
 
-            for secret_config in globals_config.secrets:
-                secret_name = f"{globals_prefix}--{secret_config.name}"
-                value = self.gsm.get_secret_version(secret_name)
-                if value is None:
-                    result.missing_secrets.append(f"global/{secret_config.name}")
-                elif self.check_placeholder_value(value):
-                    result.placeholder_secrets.append((f"global/{secret_config.name}", value))
-                else:
-                    resolved_secrets.add(secret_config.name)
-
-                for sa in globals_config.service_accounts:
-                    if self.check_placeholder_sa(sa):
-                        if sa not in result.placeholder_service_accounts:
-                            result.placeholder_service_accounts.append(sa)
+            for category_name, secret_configs in globals_config.get_all_secret_categories().items():
+                for secret_config in secret_configs:
+                    secret_name = f"{globals_prefix}--{secret_config.name}"
+                    value = self.gsm.get_secret_version(secret_name)
+                    display_name = f"global/{namespace}/{secret_config.name}"
+                    if value is None:
+                        result.missing_secrets.append(display_name)
+                    elif self.check_placeholder_value(value):
+                        result.placeholder_secrets.append((display_name, value))
                     else:
-                        member = (
-                            f"serviceAccount:{sa}" if not sa.startswith("serviceAccount:") else sa
-                        )
-                        if not self.gsm.has_access(secret_name, member):
-                            result.missing_sa_access.append((f"global/{secret_config.name}", sa))
+                        resolved_secrets.add(secret_config.name)
+
+                    for sa in globals_config.service_accounts:
+                        if self.check_placeholder_sa(sa):
+                            if sa not in result.placeholder_service_accounts:
+                                result.placeholder_service_accounts.append(sa)
+                        else:
+                            member = (
+                                f"serviceAccount:{sa}"
+                                if not sa.startswith("serviceAccount:")
+                                else sa
+                            )
+                            if not self.gsm.has_access(secret_name, member):
+                                result.missing_sa_access.append((display_name, sa))
 
         # Check environment-level secrets from all secret categories
         secret_categories = env_config.get_all_secret_categories()
@@ -342,8 +345,9 @@ class SecretsValidator:
                 defined_secrets.update({s.name for s in secret_configs})
 
             # Include global secrets
-            if self.config.globals:
-                defined_secrets.update({s.name for s in self.config.globals.secrets})
+            for globals_config in self.config.get_global_namespaces().values():
+                for secret_configs in globals_config.get_all_secret_categories().values():
+                    defined_secrets.update({s.name for s in secret_configs})
 
             if project:
                 project_config = env_config.projects.get(project)

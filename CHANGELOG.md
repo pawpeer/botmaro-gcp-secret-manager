@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-06-13
+
+### Added
+- Namespaced global secrets, so global scopes can be addressed as `globals.<namespace>`.
+- Schema-free global lookup for `get` with explicit namespaces like `globals.pawpeer.SECRET`.
+- Grouped `list` output with separate environment and global sections.
+- `--include global`, `--include globals`, `--global`, and `--globals` as aliases for including global secrets in environment listings.
+
+### Fixed
+- Global secret handling now works with categorized global sections in `secrets.yml`.
+- `list globals.<namespace>` and `get globals.<namespace>.SECRET` now resolve without relying on a single flat globals schema.
+
 ## [0.5.3] - 2026-03-14
 
 ### Added
@@ -226,7 +238,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret value masking in CLI output by default
 - Support for reading secrets from stdin for security
 
-[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.0...v0.5.1

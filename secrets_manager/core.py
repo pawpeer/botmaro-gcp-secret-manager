@@ -1,11 +1,22 @@
 """Core secret management logic."""
 
 import os
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
-from .config import SecretsConfig, EnvironmentConfig, ProjectConfig, GlobalConfig
+from .config import SecretConfig, SecretsConfig, EnvironmentConfig, ProjectConfig, GlobalConfig
 from .gsm import GSMClient
 from .validator import SecretsValidator, ValidationResult
+
+
+@dataclass
+class SecretListGroup:
+    """Grouped secret listing for CLI presentation."""
+
+    title: str
+    scope: str
+    category: Optional[str]
+    secrets: List[Tuple[str, Optional[str], str]]
 
 
 class SecretsManager:
@@ -31,19 +42,116 @@ class SecretsManager:
         """Check if the env refers to the globals namespace."""
         return env == "globals"
 
-    def _get_globals_or_raise(self) -> GlobalConfig:
+    def _get_globals_or_raise(self, namespace: Optional[str] = None) -> Tuple[str, GlobalConfig]:
         """Get globals config or raise if not configured."""
-        if not self.config.globals:
-            raise ValueError(
-                "No 'globals' section configured in secrets.yml. "
-                "Add a 'globals' section with gcp_project and prefix."
-            )
-        return self.config.globals
+        if namespace:
+            globals_config = self.config.get_global_config(namespace)
+            if not globals_config:
+                raise ValueError(f"Global namespace '{namespace}' not found in configuration")
+            return globals_config.namespace or namespace, globals_config
 
-    def _get_global_secret_name(self, secret: str) -> str:
+        default_namespace = self.config.get_default_global_namespace()
+        if not default_namespace:
+            raise ValueError(
+                "Global namespace required. Use 'globals.<namespace>.<SECRET_NAME>' "
+                "or provide a config with exactly one globals namespace."
+            )
+        globals_config = self.config.get_global_config(default_namespace)
+        if not globals_config:
+            raise ValueError(f"Global namespace '{default_namespace}' not found in configuration")
+        return default_namespace, globals_config
+
+    def _get_global_secret_name(self, secret: str, namespace: Optional[str] = None) -> str:
         """Generate the full secret name for a global secret."""
-        globals_config = self._get_globals_or_raise()
-        return f"{globals_config.prefix}--{secret}"
+        resolved_namespace, globals_config = self._get_globals_or_raise(namespace)
+        return f"{globals_config.get_prefix() or resolved_namespace}--{secret}"
+
+    def _get_global_project_id(
+        self,
+        namespace: Optional[str] = None,
+        gcp_project: Optional[str] = None,
+    ) -> str:
+        """Resolve the GCP project for a global namespace."""
+        if gcp_project:
+            return gcp_project
+
+        if namespace:
+            globals_config = self.config.get_global_config(namespace)
+            if globals_config:
+                return globals_config.gcp_project
+        else:
+            default_namespace = self.config.get_default_global_namespace()
+            if default_namespace:
+                globals_config = self.config.get_global_config(default_namespace)
+                if globals_config:
+                    return globals_config.gcp_project
+
+        env_project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
+        if env_project:
+            return env_project
+
+        raise ValueError(
+            "GCP project required for global secrets. Provide --gcp-project, "
+            "set GOOGLE_CLOUD_PROJECT, or use a config that defines the global namespace."
+        )
+
+    def _default_value(self, value: object) -> str:
+        """Convert configured defaults into exportable string values."""
+        if value is None:
+            return ""
+        return str(value)
+
+    def _secret_value_or_default(
+        self, secret_config: SecretConfig, value: Optional[str]
+    ) -> Optional[str]:
+        """Return the GSM value, or the configured default when missing."""
+        if value is not None:
+            return value
+
+        if secret_config.default is not None:
+            return self._default_value(secret_config.default)
+
+        return None
+
+    def _find_secret_config(
+        self, env: str, secret: str, project: Optional[str] = None
+    ) -> Optional[SecretConfig]:
+        """Find the config entry for a secret in the active scope."""
+        if self._is_globals(env):
+            namespace = project or self.config.get_default_global_namespace()
+            if not namespace:
+                return None
+
+            globals_config = self.config.get_global_config(namespace)
+            if not globals_config:
+                return None
+
+            for secret_configs in globals_config.get_all_secret_categories().values():
+                for secret_config in secret_configs:
+                    if secret_config.name == secret:
+                        return secret_config
+            return None
+
+        env_config = self.config.get_environment(env)
+        if not env_config:
+            return None
+
+        if project:
+            project_config = env_config.projects.get(project)
+            if not project_config:
+                return None
+
+            for secret_config in project_config.secrets:
+                if secret_config.name == secret:
+                    return secret_config
+            return None
+
+        for secret_configs in env_config.get_all_secret_categories().values():
+            for secret_config in secret_configs:
+                if secret_config.name == secret:
+                    return secret_config
+
+        return None
 
     def _get_secret_name(self, env: str, project: Optional[str], secret: str) -> str:
         """
@@ -119,34 +227,36 @@ class SecretsManager:
             service_accounts_to_grant.add(deployer_sa)
 
         # Load global secrets first (project-agnostic)
-        if self.config.globals:
-            globals_config = self.config.globals
+        for global_namespace, globals_config in self.config.get_global_namespaces().items():
             globals_gsm = self._get_gsm_client(globals_config.gcp_project)
-            globals_prefix = globals_config.prefix
+            globals_prefix = globals_config.get_prefix()
 
             global_sas = set(globals_config.service_accounts)
             global_sas.update(service_accounts_to_grant)
 
-            for secret_config in globals_config.secrets:
-                secret_name = f"{globals_prefix}--{secret_config.name}"
-                value = globals_gsm.get_secret_version(secret_name)
+            for category_name, secret_configs in globals_config.get_all_secret_categories().items():
+                for secret_config in secret_configs:
+                    secret_name = f"{globals_prefix}--{secret_config.name}"
+                    value = globals_gsm.get_secret_version(secret_name)
 
-                if value is not None:
-                    # Secret exists in GSM - grant access to service accounts
-                    for sa in global_sas:
-                        member = (
-                            f"serviceAccount:{sa}" if not sa.startswith("serviceAccount:") else sa
-                        )
-                        globals_gsm.ensure_access(secret_name, member)
-                else:
-                    if secret_config.required and secret_config.default is None:
-                        raise ValueError(f"Required global secret '{secret_name}' not found")
-                    value = secret_config.default or ""
+                    if value is not None:
+                        # Secret exists in GSM - grant access to service accounts
+                        for sa in global_sas:
+                            member = (
+                                f"serviceAccount:{sa}"
+                                if not sa.startswith("serviceAccount:")
+                                else sa
+                            )
+                            globals_gsm.ensure_access(secret_name, member)
+                    else:
+                        if secret_config.required and secret_config.default is None:
+                            raise ValueError(f"Required global secret '{secret_name}' not found")
+                        value = self._default_value(secret_config.default)
 
-                secrets[secret_config.name] = value
+                    secrets[secret_config.name] = value
 
-                if export_to_env:
-                    os.environ[secret_config.name] = value
+                    if export_to_env:
+                        os.environ[secret_config.name] = value
 
         # Load all secret categories (global_secrets, serverside_secrets, etc.)
         secret_categories = env_config.get_all_secret_categories()
@@ -183,7 +293,7 @@ class SecretsManager:
                         # Fall back to default value
                         if secret_config.required and secret_config.default is None:
                             raise ValueError(f"Required secret '{secret_name}' not found")
-                        value = secret_config.default or ""
+                        value = self._default_value(secret_config.default)
 
                 secrets[secret_config.name] = value
 
@@ -235,7 +345,7 @@ class SecretsManager:
                         # Fall back to default value
                         if secret_config.required and secret_config.default is None:
                             raise ValueError(f"Required secret '{secret_name}' not found")
-                        value = secret_config.default or ""
+                        value = self._default_value(secret_config.default)
 
                 secrets[secret_config.name] = value
 
@@ -266,9 +376,9 @@ class SecretsManager:
             Dict with status information including the full secret name
         """
         if self._is_globals(env):
-            globals_config = self._get_globals_or_raise()
+            namespace, globals_config = self._get_globals_or_raise(project)
             gsm = self._get_gsm_client(globals_config.gcp_project)
-            secret_name = self._get_global_secret_name(secret)
+            secret_name = self._get_global_secret_name(secret, namespace)
         else:
             env_config = self.config.get_environment(env)
             if not env_config:
@@ -291,7 +401,12 @@ class SecretsManager:
         return result
 
     def get_secret(
-        self, env: str, secret: str, project: Optional[str] = None, version: str = "latest"
+        self,
+        env: str,
+        secret: str,
+        project: Optional[str] = None,
+        version: str = "latest",
+        gcp_project: Optional[str] = None,
     ) -> Optional[str]:
         """
         Get a secret value.
@@ -306,9 +421,17 @@ class SecretsManager:
             Secret value or None if not found
         """
         if self._is_globals(env):
-            globals_config = self._get_globals_or_raise()
-            gsm = self._get_gsm_client(globals_config.gcp_project)
-            secret_name = self._get_global_secret_name(secret)
+            namespace = project or self.config.get_default_global_namespace()
+            if not namespace:
+                raise ValueError(
+                    "Global namespace required. Use 'globals.<namespace>.<SECRET_NAME>' "
+                    "or provide a config with exactly one globals namespace."
+                )
+            globals_config = self.config.get_global_config(namespace)
+            project_id = self._get_global_project_id(namespace, gcp_project)
+            gsm = self._get_gsm_client(project_id)
+            secret_prefix = globals_config.get_prefix() if globals_config else namespace
+            secret_name = f"{secret_prefix}--{secret}"
         else:
             env_config = self.config.get_environment(env)
             if not env_config:
@@ -316,7 +439,11 @@ class SecretsManager:
             gsm = self._get_gsm_client(env_config.gcp_project)
             secret_name = self._get_secret_name(env, project, secret)
 
-        return gsm.get_secret_version(secret_name, version)
+        value = gsm.get_secret_version(secret_name, version)
+        secret_config = self._find_secret_config(env, secret, project)
+        if secret_config:
+            return self._secret_value_or_default(secret_config, value)
+        return value
 
     def delete_secret(self, env: str, secret: str, project: Optional[str] = None) -> bool:
         """
@@ -331,9 +458,9 @@ class SecretsManager:
             True if deleted, False if not found
         """
         if self._is_globals(env):
-            globals_config = self._get_globals_or_raise()
+            namespace, globals_config = self._get_globals_or_raise(project)
             gsm = self._get_gsm_client(globals_config.gcp_project)
-            secret_name = self._get_global_secret_name(secret)
+            secret_name = self._get_global_secret_name(secret, namespace)
         else:
             env_config = self.config.get_environment(env)
             if not env_config:
@@ -344,7 +471,12 @@ class SecretsManager:
         return gsm.delete_secret(secret_name)
 
     def list_secrets(
-        self, env: str, project: Optional[str] = None, scope: Optional[str] = None
+        self,
+        env: str,
+        project: Optional[str] = None,
+        scope: Optional[str] = None,
+        include_global: bool = False,
+        global_project_id: Optional[str] = None,
     ) -> List[Tuple[str, Optional[str], str]]:
         """
         List all secrets for an environment.
@@ -359,17 +491,36 @@ class SecretsManager:
         """
         # Handle 'globals' as env directly
         if self._is_globals(env):
-            globals_config = self._get_globals_or_raise()
-            globals_gsm = self._get_gsm_client(globals_config.gcp_project)
-            globals_prefix = globals_config.prefix
+            namespace = project or self.config.get_default_global_namespace()
+            if not namespace:
+                raise ValueError(
+                    "Global namespace required. Use 'globals.<namespace>' or provide "
+                    "a config with exactly one globals namespace."
+                )
+
+            globals_config = self.config.get_global_config(namespace)
+            project_id = self._get_global_project_id(namespace, global_project_id)
+            globals_gsm = self._get_gsm_client(project_id)
+            globals_prefix = globals_config.get_prefix() if globals_config else namespace
+
+            results = []
+            seen_secret_ids = set()
+
+            if globals_config:
+                for secret_configs in globals_config.get_all_secret_categories().values():
+                    for secret_config in secret_configs:
+                        secret_id = f"{globals_prefix}--{secret_config.name}"
+                        value = globals_gsm.get_secret_version(secret_id)
+                        value = self._secret_value_or_default(secret_config, value)
+                        results.append((secret_config.name, value, "global"))
+                        seen_secret_ids.add(secret_id)
 
             filter_str = f"name:{globals_prefix}--"
             secret_ids = globals_gsm.list_secrets(filter_str)
-
-            results = []
             for secret_id in secret_ids:
-                parts = secret_id.split("--")
-                name = parts[1] if len(parts) == 2 else secret_id
+                if secret_id in seen_secret_ids:
+                    continue
+                name = self._strip_prefix(secret_id, globals_prefix)
                 value = globals_gsm.get_secret_version(secret_id)
                 results.append((name, value, "global"))
             return results
@@ -382,25 +533,33 @@ class SecretsManager:
         prefix = env_config.prefix or f"botmaro-{env}"
 
         results = []
+        seen_secret_ids = set()
 
-        # Include global secrets if scope allows
-        if self.config.globals and scope in (None, "all", "global"):
-            globals_config = self.config.globals
-            globals_gsm = self._get_gsm_client(globals_config.gcp_project)
-            globals_prefix = globals_config.prefix
+        if include_global or scope == "global":
+            for global_namespace, globals_config in self.config.get_global_namespaces().items():
+                globals_gsm = self._get_gsm_client(globals_config.gcp_project)
+                globals_prefix = globals_config.get_prefix()
+                for secret_configs in globals_config.get_all_secret_categories().values():
+                    for secret_config in secret_configs:
+                        secret_id = f"{globals_prefix}--{secret_config.name}"
+                        value = globals_gsm.get_secret_version(secret_id)
+                        value = self._secret_value_or_default(secret_config, value)
+                        results.append((secret_config.name, value, "global"))
+                        seen_secret_ids.add(secret_id)
 
-            filter_str = f"name:{globals_prefix}--"
-            secret_ids = globals_gsm.list_secrets(filter_str)
+                filter_str = f"name:{globals_prefix}--"
+                secret_ids = globals_gsm.list_secrets(filter_str)
 
-            for secret_id in secret_ids:
-                parts = secret_id.split("--")
-                name = parts[1] if len(parts) == 2 else secret_id
-                value = globals_gsm.get_secret_version(secret_id)
-                results.append((name, value, "global"))
+                for secret_id in secret_ids:
+                    if secret_id in seen_secret_ids:
+                        continue
+                    name = self._strip_prefix(secret_id, globals_prefix)
+                    value = globals_gsm.get_secret_version(secret_id)
+                    results.append((name, value, "global"))
 
-        # Skip env/project secrets if only globals requested
-        if scope == "global":
-            return results
+            # Skip env/project secrets if only globals requested by legacy API.
+            if scope == "global":
+                return results
 
         # Build filter - use double-hyphen convention
         if project:
@@ -408,9 +567,32 @@ class SecretsManager:
         else:
             filter_str = f"name:{prefix}--"
 
+        if project:
+            if not scope or scope in ("all", "project"):
+                project_config = env_config.projects.get(project)
+                if project_config:
+                    for secret_config in project_config.secrets:
+                        secret_id = f"{prefix}--{project}--{secret_config.name}"
+                        value = gsm.get_secret_version(secret_id)
+                        value = self._secret_value_or_default(secret_config, value)
+                        results.append((secret_config.name, value, "project"))
+                        seen_secret_ids.add(secret_id)
+        else:
+            if not scope or scope in ("all", "env"):
+                for secret_configs in env_config.get_all_secret_categories().values():
+                    for secret_config in secret_configs:
+                        secret_id = f"{prefix}--{secret_config.name}"
+                        value = gsm.get_secret_version(secret_id)
+                        value = self._secret_value_or_default(secret_config, value)
+                        results.append((secret_config.name, value, "env"))
+                        seen_secret_ids.add(secret_id)
+
         secret_ids = gsm.list_secrets(filter_str)
 
         for secret_id in secret_ids:
+            if secret_id in seen_secret_ids:
+                continue
+
             # Parse using double-hyphen separator
             parts = secret_id.split("--")
 
@@ -448,6 +630,173 @@ class SecretsManager:
             results.append((name, value, secret_scope))
 
         return results
+
+    def _strip_prefix(self, secret_id: str, prefix: str) -> str:
+        """Strip a GSM secret prefix from a secret id."""
+        expected_prefix = f"{prefix}--"
+        if secret_id.startswith(expected_prefix):
+            return secret_id[len(expected_prefix) :]
+        return secret_id
+
+    def list_secret_groups(
+        self,
+        env: str,
+        project: Optional[str] = None,
+        include_global: bool = False,
+        global_project_id: Optional[str] = None,
+    ) -> List[SecretListGroup]:
+        """List secrets grouped by environment/global category."""
+        if self._is_globals(env):
+            namespace = project or self.config.get_default_global_namespace()
+            if not namespace:
+                raise ValueError(
+                    "Global namespace required. Use 'globals.<namespace>' or provide "
+                    "a config with exactly one globals namespace."
+                )
+            return self._list_global_groups(namespace, global_project_id)
+
+        env_config = self.config.get_environment(env)
+        if not env_config:
+            raise ValueError(f"Environment '{env}' not found")
+
+        groups = self._list_environment_groups(env, env_config, project)
+
+        if include_global:
+            for namespace in self.config.get_global_namespaces().keys():
+                groups.extend(self._list_global_groups(namespace, global_project_id))
+
+        return groups
+
+    def _list_environment_groups(
+        self,
+        env: str,
+        env_config: EnvironmentConfig,
+        project: Optional[str] = None,
+    ) -> List[SecretListGroup]:
+        """Build grouped listings for environment and project secrets."""
+        gsm = self._get_gsm_client(env_config.gcp_project)
+        prefix = env_config.prefix or f"botmaro-{env}"
+        groups: List[SecretListGroup] = []
+
+        for category_name, secret_configs in env_config.get_all_secret_categories().items():
+            entries = []
+            for secret_config in secret_configs:
+                secret_name = self._get_secret_name(env, None, secret_config.name)
+                value = gsm.get_secret_version(secret_name)
+                value = self._secret_value_or_default(secret_config, value)
+                entries.append((secret_config.name, value, "env"))
+            groups.append(
+                SecretListGroup(
+                    title=f"Environment: {env} / {category_name}",
+                    scope="env",
+                    category=category_name,
+                    secrets=entries,
+                )
+            )
+
+        if project:
+            project_config = env_config.projects.get(project)
+            if not project_config:
+                raise ValueError(f"Project '{project}' not found in environment '{env}'")
+            project_entries = []
+            for secret_config in project_config.secrets:
+                secret_name = self._get_secret_name(env, project, secret_config.name)
+                value = gsm.get_secret_version(secret_name)
+                value = self._secret_value_or_default(secret_config, value)
+                project_entries.append((secret_config.name, value, "project"))
+            groups.append(
+                SecretListGroup(
+                    title=f"Environment: {env} / Project: {project}",
+                    scope="project",
+                    category=project,
+                    secrets=project_entries,
+                )
+            )
+            return groups
+
+        # Include project secrets in their own groups when listing a whole environment.
+        for project_name, project_config in env_config.projects.items():
+            project_entries = []
+            for secret_config in project_config.secrets:
+                secret_name = f"{prefix}--{project_name}--{secret_config.name}"
+                value = gsm.get_secret_version(secret_name)
+                value = self._secret_value_or_default(secret_config, value)
+                project_entries.append((secret_config.name, value, "project"))
+            groups.append(
+                SecretListGroup(
+                    title=f"Environment: {env} / Project: {project_name}",
+                    scope="project",
+                    category=project_name,
+                    secrets=project_entries,
+                )
+            )
+
+        return groups
+
+    def _list_global_groups(
+        self,
+        namespace: str,
+        gcp_project: Optional[str] = None,
+    ) -> List[SecretListGroup]:
+        """Build grouped listings for global namespace secrets."""
+        globals_config = self.config.get_global_config(namespace)
+        project_id = self._get_global_project_id(namespace, gcp_project)
+        globals_gsm = self._get_gsm_client(project_id)
+        globals_prefix = globals_config.get_prefix() if globals_config else namespace
+
+        if globals_config:
+            groups = []
+            categorized_names = set()
+            for category_name, secret_configs in globals_config.get_all_secret_categories().items():
+                entries = []
+                for secret_config in secret_configs:
+                    secret_id = f"{globals_prefix}--{secret_config.name}"
+                    value = globals_gsm.get_secret_version(secret_id)
+                    value = self._secret_value_or_default(secret_config, value)
+                    entries.append((secret_config.name, value, "global"))
+                    categorized_names.add(secret_config.name)
+                groups.append(
+                    SecretListGroup(
+                        title=f"Globals: {namespace} / {category_name}",
+                        scope="global",
+                        category=category_name,
+                        secrets=entries,
+                    )
+                )
+
+            secret_ids = globals_gsm.list_secrets(f"name:{globals_prefix}--")
+            uncategorized = []
+            for secret_id in secret_ids:
+                name = self._strip_prefix(secret_id, globals_prefix)
+                if name in categorized_names:
+                    continue
+                value = globals_gsm.get_secret_version(secret_id)
+                uncategorized.append((name, value, "global"))
+            if uncategorized:
+                groups.append(
+                    SecretListGroup(
+                        title=f"Globals: {namespace} / uncategorized",
+                        scope="global",
+                        category="uncategorized",
+                        secrets=uncategorized,
+                    )
+                )
+            return groups
+
+        entries = []
+        for secret_id in globals_gsm.list_secrets(f"name:{globals_prefix}--"):
+            name = self._strip_prefix(secret_id, globals_prefix)
+            value = globals_gsm.get_secret_version(secret_id)
+            entries.append((name, value, "global"))
+
+        return [
+            SecretListGroup(
+                title=f"Globals: {namespace}",
+                scope="global",
+                category=None,
+                secrets=entries,
+            )
+        ]
 
     def grant_access_bulk(
         self,

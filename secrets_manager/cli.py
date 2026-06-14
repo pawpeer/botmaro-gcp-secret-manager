@@ -89,6 +89,11 @@ def bootstrap(
     deployer_sa: Optional[str] = typer.Option(
         None, "--deployer-sa", help="Deployer service account to grant access"
     ),
+    grant_access: bool = typer.Option(
+        True,
+        "--grant-access/--no-grant-access",
+        help="Grant configured service accounts access to loaded secrets",
+    ),
     output: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output file for .env format"
     ),
@@ -127,6 +132,7 @@ def bootstrap(
                 export_to_env=export,
                 runtime_sa=runtime_sa,
                 deployer_sa=deployer_sa,
+                grant_access=grant_access,
             )
 
         # Display results
@@ -182,6 +188,11 @@ def export(
     mask: bool = typer.Option(
         True, "--mask/--no-mask", help="Mask secrets in logs (for GitHub Actions formats)"
     ),
+    grant_access: bool = typer.Option(
+        True,
+        "--grant-access/--no-grant-access",
+        help="Grant configured service accounts access to loaded secrets",
+    ),
     github_env: bool = typer.Option(
         False, "--github-env", help="Write directly to $GITHUB_ENV (GitHub Actions only)"
     ),
@@ -234,6 +245,7 @@ def export(
                 env=env,
                 project=project,
                 export_to_env=False,  # Don't export to environment automatically
+                grant_access=grant_access,
             )
 
         if verbose:

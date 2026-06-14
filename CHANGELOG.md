@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-06-13
+
+### Added
+- `--no-grant-access` for `bootstrap` and `export`, allowing CI jobs to load secrets without attempting IAM policy updates.
+
+### Fixed
+- Permission denied errors now include the GCP project and secret ID that failed.
+
 ## [0.5.4] - 2026-06-13
 
 ### Added
@@ -238,7 +246,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret value masking in CLI output by default
 - Support for reading secrets from stdin for security
 
-[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.1...v0.5.2

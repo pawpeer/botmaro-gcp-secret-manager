@@ -107,6 +107,44 @@ def test_bootstrap_exports_all_global_categories_before_env_overrides():
     assert secrets["NODE_VERSION"] == "20"
 
 
+def test_bootstrap_can_skip_access_grants():
+    config = SecretsConfig(
+        globals={
+            "pawpeer": {
+                "gcp_project": "global-project",
+                "service_accounts": ["github-actions@example.iam.gserviceaccount.com"],
+                "shared_secrets": [{"name": "SHARED_API_KEY"}],
+            }
+        },
+        environments={
+            "staging": EnvironmentConfig(
+                name="staging",
+                gcp_project="staging-project",
+                prefix="pawpeer-staging",
+                service_accounts=["runtime@example.iam.gserviceaccount.com"],
+                global_secrets=[SecretConfig(name="ENV_API_KEY")],
+            )
+        },
+    )
+    global_gsm = FakeGSM({"pawpeer--SHARED_API_KEY": "global-value"})
+    staging_gsm = FakeGSM({"pawpeer-staging--ENV_API_KEY": "env-value"})
+    manager = SecretsManager(config)
+    attach_fake_clients(
+        manager,
+        {
+            "global-project": global_gsm,
+            "staging-project": staging_gsm,
+        },
+    )
+
+    secrets = manager.bootstrap("staging", export_to_env=False, grant_access=False)
+
+    assert secrets["SHARED_API_KEY"] == "global-value"
+    assert secrets["ENV_API_KEY"] == "env-value"
+    assert global_gsm.access_grants == []
+    assert staging_gsm.access_grants == []
+
+
 def test_get_namespaced_global_secret_without_schema():
     manager = SecretsManager(SecretsConfig())
     attach_fake_clients(

@@ -83,6 +83,12 @@ class GSMClient:
             return response.payload.data.decode("UTF-8")
         except exceptions.NotFound:
             return None
+        except exceptions.PermissionDenied as e:
+            raise PermissionError(
+                f"Permission denied accessing secret '{secret_id}' in project "
+                f"'{self.project_id}' ({name}). Grant the caller "
+                "roles/secretmanager.secretAccessor on this secret or project."
+            ) from e
 
     def list_secrets(self, filter_str: Optional[str] = None) -> List[str]:
         """

@@ -195,6 +195,7 @@ class SecretsManager:
         export_to_env: bool = True,
         runtime_sa: Optional[str] = None,
         deployer_sa: Optional[str] = None,
+        grant_access: bool = True,
     ) -> Dict[str, str]:
         """
         Bootstrap an environment by loading all secrets.
@@ -208,6 +209,7 @@ class SecretsManager:
             export_to_env: Whether to export secrets to os.environ
             runtime_sa: Optional runtime service account to grant access (in addition to config)
             deployer_sa: Optional deployer service account to grant access (in addition to config)
+            grant_access: Whether to grant configured service accounts access to loaded secrets
 
         Returns:
             Dict of secret names to values
@@ -241,13 +243,14 @@ class SecretsManager:
 
                     if value is not None:
                         # Secret exists in GSM - grant access to service accounts
-                        for sa in global_sas:
-                            member = (
-                                f"serviceAccount:{sa}"
-                                if not sa.startswith("serviceAccount:")
-                                else sa
-                            )
-                            globals_gsm.ensure_access(secret_name, member)
+                        if grant_access:
+                            for sa in global_sas:
+                                member = (
+                                    f"serviceAccount:{sa}"
+                                    if not sa.startswith("serviceAccount:")
+                                    else sa
+                                )
+                                globals_gsm.ensure_access(secret_name, member)
                     else:
                         if secret_config.required and secret_config.default is None:
                             raise ValueError(f"Required global secret '{secret_name}' not found")
@@ -282,13 +285,14 @@ class SecretsManager:
 
                     if value is not None:
                         # Secret exists in GSM - grant access to service accounts
-                        for sa in service_accounts_to_grant:
-                            member = (
-                                f"serviceAccount:{sa}"
-                                if not sa.startswith("serviceAccount:")
-                                else sa
-                            )
-                            gsm.ensure_access(secret_name, member)
+                        if grant_access:
+                            for sa in service_accounts_to_grant:
+                                member = (
+                                    f"serviceAccount:{sa}"
+                                    if not sa.startswith("serviceAccount:")
+                                    else sa
+                                )
+                                gsm.ensure_access(secret_name, member)
                     else:
                         # Fall back to default value
                         if secret_config.required and secret_config.default is None:
@@ -334,13 +338,14 @@ class SecretsManager:
 
                     if value is not None:
                         # Secret exists in GSM - grant access to service accounts
-                        for sa in project_service_accounts:
-                            member = (
-                                f"serviceAccount:{sa}"
-                                if not sa.startswith("serviceAccount:")
-                                else sa
-                            )
-                            gsm.ensure_access(secret_name, member)
+                        if grant_access:
+                            for sa in project_service_accounts:
+                                member = (
+                                    f"serviceAccount:{sa}"
+                                    if not sa.startswith("serviceAccount:")
+                                    else sa
+                                )
+                                gsm.ensure_access(secret_name, member)
                     else:
                         # Fall back to default value
                         if secret_config.required and secret_config.default is None:

@@ -850,6 +850,7 @@ class SecretsManager:
         env: str,
         project: Optional[str] = None,
         workflow_path: Optional[str] = None,
+        access_check: bool = True,
     ) -> ValidationResult:
         """
         Validate secrets configuration and state.
@@ -865,6 +866,7 @@ class SecretsManager:
             env: Environment name
             project: Optional project name to scope to
             workflow_path: Optional path to workflow file or .github/workflows directory
+            access_check: Whether to validate configured service account IAM bindings
 
         Returns:
             ValidationResult with all findings
@@ -877,8 +879,13 @@ class SecretsManager:
             raise ValueError(f"Environment '{env}' not found")
 
         gsm = self._get_gsm_client(env_config.gcp_project)
-        validator = SecretsValidator(self.config, gsm)
+        validator = SecretsValidator(self.config, gsm, get_gsm_client=self._get_gsm_client)
 
         workflow_path_obj = Path(workflow_path) if workflow_path else None
 
-        return validator.validate_secrets(env=env, project=project, workflow_path=workflow_path_obj)
+        return validator.validate_secrets(
+            env=env,
+            project=project,
+            workflow_path=workflow_path_obj,
+            access_check=access_check,
+        )

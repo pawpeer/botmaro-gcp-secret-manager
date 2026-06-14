@@ -35,6 +35,9 @@ class FakeGSM:
     def ensure_access(self, secret_name, member):
         self.access_grants.append((secret_name, member))
 
+    def has_access(self, secret_name, member):
+        return (secret_name, member) in self.access_grants
+
 
 def attach_fake_clients(manager, clients):
     manager._get_gsm_client = lambda project_id: clients[project_id]
@@ -143,6 +146,38 @@ def test_bootstrap_can_skip_access_grants():
     assert secrets["ENV_API_KEY"] == "env-value"
     assert global_gsm.access_grants == []
     assert staging_gsm.access_grants == []
+
+
+def test_check_secrets_validates_globals_in_global_project_without_access_check():
+    config = SecretsConfig(
+        globals={
+            "pawpeer": {
+                "gcp_project": "global-project",
+                "shared_secrets": [{"name": "SHARED_API_KEY"}],
+                "defaulted": [{"name": "NODE_VERSION", "required": False, "default": 20}],
+            }
+        },
+        environments={
+            "staging": EnvironmentConfig(
+                name="staging",
+                gcp_project="staging-project",
+                prefix="pawpeer-staging",
+                global_secrets=[SecretConfig(name="ENV_API_KEY")],
+            )
+        },
+    )
+    manager = SecretsManager(config)
+    attach_fake_clients(
+        manager,
+        {
+            "global-project": FakeGSM({"pawpeer--SHARED_API_KEY": "global-value"}),
+            "staging-project": FakeGSM({"pawpeer-staging--ENV_API_KEY": "env-value"}),
+        },
+    )
+
+    result = manager.check_secrets("staging", access_check=False)
+
+    assert result.get_summary() == "✅ All checks passed"
 
 
 def test_get_namespaced_global_secret_without_schema():

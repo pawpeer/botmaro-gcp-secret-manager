@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-06-13
+
+### Added
+- `--no-access-check` for `check`, allowing CI validation to verify secret presence without requiring secret-level IAM policy inspection.
+
+### Fixed
+- `check` now validates global secrets against their configured GCP project instead of the active environment project.
+- `check` now honors configured default values when validating missing GSM secrets.
+- `check` now exits successfully when validation passes.
+
 ## [0.5.5] - 2026-06-13
 
 ### Added
@@ -246,7 +256,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret value masking in CLI output by default
 - Support for reading secrets from stdin for security
 
-[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/pawpeer/botmaro-gcp-secret-manager/compare/v0.5.2...v0.5.3

@@ -162,6 +162,10 @@ def bootstrap(
 
     except typer.Exit:
         raise
+    except typer.Exit:
+        raise
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]✗ Error:[/red] {str(e)}", style="bold red")
         raise typer.Exit(code=1)
@@ -825,6 +829,11 @@ def check(
     workflows: Optional[str] = typer.Option(
         None, "--workflows", "-w", help="Path to workflow file or .github/workflows directory"
     ),
+    access_check: bool = typer.Option(
+        True,
+        "--access-check/--no-access-check",
+        help="Validate configured service account IAM bindings",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed findings"),
 ):
     """
@@ -866,6 +875,7 @@ def check(
                 env=env,
                 project=project,
                 workflow_path=workflows,
+                access_check=access_check,
             )
 
         # Display summary
@@ -931,6 +941,8 @@ def check(
             console.print(f"\n[bold green]✅ All checks passed![/bold green]")
             raise typer.Exit(code=0)
 
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]✗ Error:[/red] {str(e)}", style="bold red")
         raise typer.Exit(code=1)
